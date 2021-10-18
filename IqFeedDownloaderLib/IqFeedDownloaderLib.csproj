@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net5.0</TargetFramework>
+        <RootNamespace>IqFeedDownloaderLib</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="IQFeed.CSharpApiClient" Version="2.7.0" />
+      <PackageReference Include="log4net" Version="2.0.12" />
+      <PackageReference Include="NodaTime" Version="3.0.7" />
+      <PackageReference Include="NodaTime.Serialization.SystemTextJson" Version="1.0.0" />
+      <PackageReference Include="Npgsql" Version="6.0.0-rc.1" />
+      <PackageReference Include="Npgsql.NodaTime" Version="6.0.0-rc.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\..\CSharpCommon\CustomShared\CustomShared.csproj" />
+      <ProjectReference Include="..\Models\Models.csproj" />
+    </ItemGroup>
+
+</Project>
