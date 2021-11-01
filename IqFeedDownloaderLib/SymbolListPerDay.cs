@@ -6,7 +6,6 @@ namespace IqFeedDownloaderLib
 {
     public class SymbolListPerDay
     {
-        // [JsonConverter()]
         [JsonPropertyName("date")] public LocalDate Date { get; set; }
 
         [JsonPropertyName("symbols")] public List<string> Symbols { get; set; }

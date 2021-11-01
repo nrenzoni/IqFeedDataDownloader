@@ -7,15 +7,19 @@ namespace DownloaderMain
         public enum StrategyType
         {
             Breakouts,
-            DailyGainers,
-            DailyLosers
+            PremarketGainers,
+            PremarketLosers,
+            SectorEtf,
+            RunningUp
+            
         }
 
         public enum DataType
         {
             Tick,
             MinuteOhlc,
-            DailyOhlc
+            DailyOhlc,
+            Default
         }
 
         [Verb("download_symbols")]

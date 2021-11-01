@@ -28,8 +28,8 @@ namespace UnitTests
         [Test]
         public async Task TestDownloadOhlc()
         {
-            var iqMinuteOhlcDownloader = new IqMinuteOhlcDownloader(nConcurrent: 1);
-            using var minuteOhlcController = new MinuteOhlcController(
+            using var iqMinuteOhlcDownloader = new IqMinuteOhlcDownloader(nConcurrent: 1);
+            var minuteOhlcController = new MinuteOhlcController(
                 iqMinuteOhlcDownloader,
                 _scope.Resolve<MinuteOhlcRepoPg>(),
                 _scope.Resolve<DownloadPlanUtils>());
@@ -49,7 +49,7 @@ namespace UnitTests
         public async Task GetUnsavedDownloadPlansAsyncTest()
         {
             var iqMinuteOhlcDownloader = new IqMinuteOhlcDownloader(nConcurrent: 1);
-            using var minuteOhlcController = new MinuteOhlcController(
+            var minuteOhlcController = new MinuteOhlcController(
                 iqMinuteOhlcDownloader,
                 _scope.Resolve<MinuteOhlcRepoPg>(),
                 _scope.Resolve<DownloadPlanUtils>());
@@ -64,7 +64,7 @@ namespace UnitTests
 
             var plans = downloadPlanBuilder.GetPlans(symbolsForDateContainer);
 
-            var unsavedPlans = await minuteOhlcController.GetUnsavedDownloadPlansAsync(plans);
+            var unsavedPlans = await minuteOhlcController.GetUnsavedDownloadPlans(plans);
         }
     }
 }

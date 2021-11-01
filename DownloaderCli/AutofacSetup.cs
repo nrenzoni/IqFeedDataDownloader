@@ -17,11 +17,14 @@ namespace DownloaderMain
                         IqFeedDownloaderConfigVariables.Instance.MarketDayClosedListDir))
                 .As<IYearNonWeekendClosedDayChecker>();
             builder.RegisterType<MarketDayChecker>();
-            builder.Register(c => new DailyTicksDownloaderPathBuilder(
+            builder.Register(c => new DailyTicksDownloaderPathBuilderImpl(
                 IqFeedDownloaderConfigVariables.Instance.IqfeedTickDataBaseDirectory));
 
             builder.Register(c =>
-                    new MinuteOhlcRepoPg(IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr))
+                    new MinuteOhlcRepoPg(
+                        IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr,
+                        "minute_ohlc",
+                        maxSimultaneousSavers: 50))
                 .As<IOhlcRepoCombined<MinuteOhlc, ZonedDateTime>>()
                 .SingleInstance();
 
@@ -41,13 +44,24 @@ namespace DownloaderMain
             builder.RegisterType<DailyOhlcController>()
                 .SingleInstance();
             builder.Register(c =>
-                    new DailyOhlcRepoPg(IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr))
+                    new DailyOhlcRepoPg(
+                        IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr,
+                        "daily_ohlc",
+                        maxSimultaneousSavers: 50))
                 .As<IOhlcRepoCombined<DailyOhlc, LocalDate>>()
                 .SingleInstance();
             builder.RegisterType<IqDailyOhlcDownloader>();
 
             builder.RegisterType<IqMinuteOhlcDownloader>();
             builder.RegisterType<MinuteOhlcController>();
+
+            builder.Register(c =>
+                new IqTickDownloader(
+                    c.Resolve<DownloadPlanUtils>(),
+                    c.Resolve<DailyTicksDownloaderPathBuilderImpl>()));
+            builder.Register(c =>
+                new SavedIqTickChecker(c.Resolve<DownloadPlanUtils>(),
+                    c.Resolve<DailyTicksDownloaderPathBuilderImpl>()));
 
             builder.Register(c =>
                 new TiSymbolsPerDayRetrieverClient(

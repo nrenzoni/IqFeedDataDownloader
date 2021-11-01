@@ -17,6 +17,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\IqFeedDownloaderLib\IqFeedDownloaderLib.csproj" />
+      <ProjectReference Include="..\ModelGenerators\ModelGenerators.csproj" />
     </ItemGroup>
 
 </Project>

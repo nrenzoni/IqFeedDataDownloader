@@ -22,20 +22,18 @@ namespace IqFeedDownloaderLib
 
     public abstract class IqBaseDownloader : IDisposable, IIqDownloader
     {
+        private static readonly ILog Log = LogManager.GetLogger(typeof(IqBaseDownloader));
+
         protected readonly uint MaxRetry;
         private readonly uint _nConcurrent;
-        private static readonly ILog Log = LogManager.GetLogger(typeof(IqBaseDownloader));
 
         protected readonly LookupClient LookupClient;
 
         private readonly List<Task> _concurrentTasks;
         private Task _finishedWatcherTask;
 
-        private readonly CancellationTokenSource _finishedCts = new();
-        public CancellationToken FinishedToken => _finishedCts.Token;
 
-
-        protected IqBaseDownloader(uint maxRetry = 3, uint nConcurrent = 20)
+        protected IqBaseDownloader(uint maxRetry, uint nConcurrent)
         {
             MaxRetry = maxRetry;
             _nConcurrent = nConcurrent;
@@ -45,11 +43,17 @@ namespace IqFeedDownloaderLib
 
         public void Download(IEnumerable<DownloadPlan> downloadPlans)
         {
+            if (!CanDownload)
+                throw new Exception("CanDownload is false.");
+
             DownloadInit(downloadPlans);
 
             LookupClient.Connect();
 
             DownloadAndInitTasks();
+
+            _finishedWatcherTask = Task.Run(AllFinishedWatcher);
+            _finishedWatcherTask.Wait();
         }
 
         protected abstract void DownloadInit(IEnumerable<DownloadPlan> downloadPlans);
@@ -64,8 +68,6 @@ namespace IqFeedDownloaderLib
                     Task.Run(async () => await DownloadTask())
                 );
             }
-
-            _finishedWatcherTask = Task.Run(AllFinishedWatcher);
         }
 
         protected abstract Task DownloadTask();
@@ -73,8 +75,9 @@ namespace IqFeedDownloaderLib
         private void AllFinishedWatcher()
         {
             TasksRunner.WaitForAllTasksToComplete(_concurrentTasks);
-            _finishedCts.Cancel();
         }
+
+        protected abstract bool CanDownload { get; }
 
         public void Dispose()
         {
@@ -124,12 +127,13 @@ namespace IqFeedDownloaderLib
         }
     }
 
-    public abstract class IqOhlcBaseDownloader<TOhlc, TTime, TMsg> : IqBaseDownloader
+    public abstract class IqOhlcBaseDownloader<TOhlc, TTime, TMsg> : IqBaseDownloader, IObservable<TOhlc>
         where TOhlc : Ohlc<TTime>
     {
-        private static readonly ILog Log = LogManager.GetLogger(typeof(IqOhlcBaseDownloader<,,>));
+        private static readonly ILog Log = LogManager.GetLogger(
+            typeof(IqOhlcBaseDownloader<TOhlc, TTime, TMsg>).GetRealTypeName());
 
-        public ConcurrentQueue<TOhlc> DownloadedOhlc { get; } = new();
+        private readonly List<IObserver<TOhlc>> _observers = new();
 
         private ConcurrentQueue<DownloadPlan> _downloadPlans;
 
@@ -177,7 +181,8 @@ namespace IqFeedDownloaderLib
 
                 foreach (var ohlc in ohlcObjs)
                 {
-                    DownloadedOhlc.Enqueue(ohlc);
+                    foreach (var o in _observers)
+                        o.OnNext(ohlc);
                 }
             }
         }
@@ -195,6 +200,40 @@ namespace IqFeedDownloaderLib
             DateTime endTime);
 
         protected abstract TOhlc ToOhlc(TMsg message, string symbol);
+
+        public IDisposable Subscribe(IObserver<TOhlc> observer)
+        {
+            if (!_observers.Contains(observer))
+                _observers.Add(observer);
+            return new IqOhlcBaseDownloaderUnsubscriber<TOhlc>(_observers, observer);
+        }
+
+        protected override bool CanDownload => _observers.Count > 0;
+
+        public new void Dispose()
+        {
+            base.Dispose();
+            _observers.ForEach(o => o.OnCompleted());
+            _observers.Clear();
+        }
+    }
+
+    internal class IqOhlcBaseDownloaderUnsubscriber<T> : IDisposable
+    {
+        private readonly List<IObserver<T>> _observers;
+        private readonly IObserver<T> _observer;
+
+        public IqOhlcBaseDownloaderUnsubscriber(List<IObserver<T>> observers, IObserver<T> observer)
+        {
+            _observers = observers;
+            _observer = observer;
+        }
+
+        public void Dispose()
+        {
+            if (_observers.Contains(_observer))
+                _observers.Remove(_observer);
+        }
     }
 
     public class IqDailyOhlcDownloader : IqOhlcBaseDownloader<DailyOhlc, LocalDate, DailyWeeklyMonthlyMessage>

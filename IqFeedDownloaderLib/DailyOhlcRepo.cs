@@ -10,6 +10,8 @@ namespace IqFeedDownloaderLib
     public interface IOhlcQuerier
     {
         public Task<Dictionary<string, SymbolDateSet>> GetAlreadySavedDaysAsync(List<SymbolDatePair> toCheck);
+
+        public Task<SortedSet<LocalDate>> GetSavedDatesAsync(DownloadPlan downloadPlan);
     }
 
     public interface IOhlcRepoCombined<TOhlc, TTime>
@@ -25,8 +27,9 @@ namespace IqFeedDownloaderLib
 
         private static string TsFieldName = "date";
 
-        public DailyOhlcRepoPg(string connectionStr, uint flushSize = 10000)
-            : base(connectionStr, "daily_ohlc", TsFieldName, TsFieldName, flushSize)
+        public DailyOhlcRepoPg(string connectionStr, string tableName, uint flushSize = 50000, uint maxSimultaneousSavers = 50)
+            : base(connectionStr, tableName, TsFieldName, TsFieldName,
+                flushSize, maxSimultaneousSavers)
         {
         }
 

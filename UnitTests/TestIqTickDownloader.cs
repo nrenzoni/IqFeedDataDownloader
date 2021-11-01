@@ -39,7 +39,7 @@ namespace UnitTests
 
             var iqTickDownloader = new IqTickDownloader(
                 _scope.Resolve<DownloadPlanUtils>(),
-                _scope.Resolve<DailyTicksDownloaderPathBuilder>(),
+                _scope.Resolve<DailyTicksDownloaderPathBuilderImpl>(),
                 nConcurrent: 1);
 
             iqTickDownloader.Download(downloadPlans);
@@ -65,7 +65,7 @@ namespace UnitTests
 
             using var iqTickDownloader = new IqTickDownloader(
                 _scope.Resolve<DownloadPlanUtils>(),
-                _scope.Resolve<DailyTicksDownloaderPathBuilder>(),
+                _scope.Resolve<DailyTicksDownloaderPathBuilderImpl>(),
                 nConcurrent: 1);
 
             iqTickDownloader.Download(downloadPlans);

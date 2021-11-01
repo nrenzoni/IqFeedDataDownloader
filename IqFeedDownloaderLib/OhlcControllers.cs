@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CustomShared;
 using IQFeed.CSharpApiClient.Lookup.Historical.Messages;
 using log4net;
 using Models;
@@ -13,11 +15,7 @@ namespace IqFeedDownloaderLib
 {
     public interface IOhlcController
     {
-        public void DownloadAndSaveMissingAsync(IEnumerable<DownloadPlan> downloadPlans);
-
-        public Task<List<DownloadPlan>> GetUnsavedDownloadPlansAsync(List<DownloadPlan> downloadPlansToCheck);
-
-        public Task FilterOutAlreadySavedDatesAsync(List<SymbolDateSet> symbolDateSetList);
+        public Task<List<DownloadPlan>> GetUnsavedDownloadPlans(List<DownloadPlan> downloadPlansToCheck);
 
         public Task DownloadOhlcAsync(
             SymbolsForDateContainer symbolsForDateContainer,
@@ -25,172 +23,87 @@ namespace IqFeedDownloaderLib
     }
 
     public abstract class OhlcControllerBase<TDownloader, TOhlc, TTime, TMsg>
-        : IOhlcController, IDisposable
+        : IOhlcController
         where TDownloader : IqOhlcBaseDownloader<TOhlc, TTime, TMsg>
         where TOhlc : Ohlc<TTime>
     {
-        private static readonly ILog Log = LogManager.GetLogger(typeof(OhlcControllerBase<,,,>));
+        private static readonly ILog Log = LogManager.GetLogger(
+            typeof(OhlcControllerBase<TDownloader, TOhlc, TTime, TMsg>).GetRealTypeName());
 
         private readonly TDownloader _iqDailyOhlcDownloader;
 
-        private readonly IOhlcRepoCombined<TOhlc, TTime> _ohlcRepoSaverBaseSaver;
-
-        private readonly ConcurrentQueue<TOhlc> _toVerify = new();
-        private readonly uint _verifySavedSize = 10000;
-
-        private readonly CancellationTokenSource _cts = new();
-
-        private readonly Task _backgroundSaver;
+        private readonly IOhlcRepoCombined<TOhlc, TTime> _ohlcRepo;
 
         private readonly DownloadPlanUtils _downloadPlanUtils;
 
 
         protected OhlcControllerBase(
             TDownloader iqDailyOhlcDownloader,
-            IOhlcRepoCombined<TOhlc, TTime> dailyOhlcRepoSaverBaseSaver, DownloadPlanUtils downloadPlanUtils)
+            IOhlcRepoCombined<TOhlc, TTime> ohlcRepo, DownloadPlanUtils downloadPlanUtils)
         {
             _iqDailyOhlcDownloader = iqDailyOhlcDownloader;
-            _ohlcRepoSaverBaseSaver = dailyOhlcRepoSaverBaseSaver;
+            _ohlcRepo = ohlcRepo;
             _downloadPlanUtils = downloadPlanUtils;
-
-            _backgroundSaver = Task.Run(async () => await GetUnsavedAndSaveAsync());
         }
 
-        public void DownloadAndSaveMissingAsync(IEnumerable<DownloadPlan> downloadPlans)
+        public async Task<List<DownloadPlan>> GetUnsavedDownloadPlans(List<DownloadPlan> downloadPlans)
         {
-            _iqDailyOhlcDownloader.Download(downloadPlans);
+            Log.Info($"Getting unsaved plans to download for {downloadPlans.Count} plans...");
 
-            while (!_iqDailyOhlcDownloader.FinishedToken.IsCancellationRequested ||
-                   _iqDailyOhlcDownloader.DownloadedOhlc.Count > 0)
+            var unsavedPlans = new List<DownloadPlan>();
+
+            foreach (var downloadPlan in downloadPlans)
             {
-                var res = _iqDailyOhlcDownloader.DownloadedOhlc.TryDequeue(out var popped);
-                if (res == false)
-                {
-                    Thread.Sleep(100);
-                    continue;
-                }
-
-                _toVerify.Enqueue(popped);
-            }
-        }
-
-        public async Task<List<DownloadPlan>> GetUnsavedDownloadPlansAsync(List<DownloadPlan> downloadPlansToCheck)
-        {
-            Log.Info($"Getting unsaved plans to download for {downloadPlansToCheck.Count} plans...");
-
-            var marketDaySymbolDateSetList =
-                _downloadPlanUtils.ToMarketDaySymbolDateSetList(downloadPlansToCheck);
-
-            // first filter already downloaded
-            await FilterOutAlreadySavedDatesAsync(marketDaySymbolDateSetList);
-
-            // then build contiguous schemata for missing dates per symbol
-            var missingDownloadPlans = new List<DownloadPlan>();
-
-            foreach (var symbolDateSet in marketDaySymbolDateSetList)
-            {
-                if (symbolDateSet.Dates.Count == 0)
+                var newDownloadPlan =
+                    await FilterOutAlreadySavedDatesAsyncIndividualPlan(downloadPlan);
+                if (newDownloadPlan == null)
                     continue;
 
-                var downloadDateSchemata =
-                    _downloadPlanUtils.BuildDownloadDateSchemataContiguousDates(symbolDateSet.Dates);
-
-                missingDownloadPlans.Add(
-                    new DownloadPlan
-                    {
-                        Symbol = symbolDateSet.Symbol,
-                        DownloadDateSchemata = downloadDateSchemata
-                    });
+                unsavedPlans.Add(newDownloadPlan);
             }
 
-            return missingDownloadPlans;
+            return unsavedPlans;
         }
 
-        private async Task GetUnsavedAndSaveAsync()
+        public async Task<DownloadPlan> FilterOutAlreadySavedDatesAsyncIndividualPlan(DownloadPlan downloadPlan)
         {
-            while (!_cts.IsCancellationRequested || _toVerify.Count > 0)
+            if (downloadPlan.DownloadDateSchemata.Count == 0)
+                return null;
+
+            var savedDates = await _ohlcRepo.GetSavedDatesAsync(downloadPlan);
+            var symbolDateSet = _downloadPlanUtils.ToMarketDaySymbolDateSet(downloadPlan);
+            symbolDateSet.Dates.ExceptWith(savedDates);
+
+            if (symbolDateSet.Dates.Count == 0)
+                return null;
+
+            var newDateSchemata =
+                _downloadPlanUtils.BuildDownloadDateSchemataContiguousDates(
+                    symbolDateSet.Dates.ToImmutableSortedSet());
+
+            return new DownloadPlan
             {
-                if (_toVerify.Count < _verifySavedSize && !_cts.IsCancellationRequested)
-                {
-                    await Task.Delay(100);
-                    continue;
-                }
-
-                List<Tuple<SymbolDatePair, TOhlc>> toVerify = GetSymbolDatesToVerifyIfSavedOuter();
-
-                Dictionary<string, SymbolDateSet> alreadySaved =
-                    await GetAlreadySaved(toVerify.Select(i => i.Item1)
-                        .ToHashSet().ToList());
-
-                var missingToSave = GetMissingToSave(toVerify, alreadySaved);
-
-                foreach (var dailyOhlc in missingToSave)
-                {
-                    _ohlcRepoSaverBaseSaver.Save(dailyOhlc);
-                }
-            }
+                Symbol = downloadPlan.Symbol,
+                DownloadDateSchemata = newDateSchemata
+            };
         }
 
-        protected List<TOhlc> GetMissingToSave(
-            List<Tuple<SymbolDatePair, TOhlc>> toVerify,
-            Dictionary<string, SymbolDateSet> alreadySaved)
+        public async Task DownloadOhlcAsync(
+            List<DownloadPlan> downloadPlans)
         {
-            List<TOhlc> missingToSave = new();
+            var obs = new IqOhlcBaseDownloaderObserverSaver<TOhlc, TTime>(_ohlcRepo);
+            using var _ = _iqDailyOhlcDownloader.Subscribe(obs);
 
-            foreach (var (symbolDate, ohlcVal) in toVerify)
+            var unsavedDownloadPlans =
+                await GetUnsavedDownloadPlans(downloadPlans);
+
+            if (unsavedDownloadPlans.Count == 0)
             {
-                if (alreadySaved.ContainsKey(symbolDate.Symbol)
-                    && alreadySaved[symbolDate.Symbol].Dates.Contains(symbolDate.Date))
-                    continue;
-
-                missingToSave.Add(ohlcVal);
+                Log.Info("No plans to download.");
+                return;
             }
 
-            return missingToSave;
-        }
-
-        private List<Tuple<SymbolDatePair, TOhlc>> GetSymbolDatesToVerifyIfSavedOuter()
-        {
-            var toVerify = new List<Tuple<SymbolDatePair, TOhlc>>();
-            for (int i = 0; i < _verifySavedSize; i++)
-            {
-                var dequeueRes = _toVerify.TryDequeue(out var poppedDailyOhlc);
-                if (dequeueRes == false)
-                    break;
-
-                var toVerifyInnerRes = GetSymbolDatesToVerifyIfSavedTemplate(poppedDailyOhlc);
-                toVerify.Add(toVerifyInnerRes);
-            }
-
-            return toVerify;
-        }
-
-        protected abstract Tuple<SymbolDatePair, TOhlc> GetSymbolDatesToVerifyIfSavedTemplate(TOhlc poppedDailyOhlc);
-
-        private async Task<Dictionary<string, SymbolDateSet>> GetAlreadySaved(
-            List<SymbolDatePair> symbolDatePairs)
-        {
-            return
-                await _ohlcRepoSaverBaseSaver.GetAlreadySavedDaysAsync(
-                    symbolDatePairs);
-        }
-
-        public async Task FilterOutAlreadySavedDatesAsync(List<SymbolDateSet> symbolDateSetList)
-        {
-            List<SymbolDatePair> symbolWithDateTuples =
-                symbolDateSetList.SelectMany(i =>
-                        i.Dates.Select(x =>
-                            new SymbolDatePair { Symbol = i.Symbol, Date = x }
-                        ))
-                    .ToList();
-
-            var alreadySaved = await GetAlreadySaved(symbolWithDateTuples);
-
-            foreach (var symbolDate in symbolDateSetList)
-            {
-                if (alreadySaved.ContainsKey(symbolDate.Symbol))
-                    symbolDate.Dates.ExceptWith(alreadySaved[symbolDate.Symbol].Dates);
-            }
+            _iqDailyOhlcDownloader.Download(unsavedDownloadPlans);
         }
 
         public async Task DownloadOhlcAsync(
@@ -201,22 +114,40 @@ namespace IqFeedDownloaderLib
                 ohlcDownloadPlanBuilder.GetPlans(symbolsForDateContainer)
                     .ToList();
 
-            var unsavedDownloadPlans =
-                await GetUnsavedDownloadPlansAsync(downloadPlans);
+            await DownloadOhlcAsync(downloadPlans);
+        }
+    }
 
-            if (unsavedDownloadPlans.Count == 0)
-            {
-                Log.Info("No plans to download.");
-                return;
-            }
-            
-            DownloadAndSaveMissingAsync(unsavedDownloadPlans);
+    public class IqOhlcBaseDownloaderObserverSaver<TOhlc, TTime> : IObserver<TOhlc>
+        where TOhlc : Ohlc<TTime>
+    {
+        private static readonly ILog Log = LogManager.GetLogger(
+            typeof(IqOhlcBaseDownloaderObserverSaver<TOhlc, TTime>).GetRealTypeName());
+
+        private readonly IOhlcRepoCombined<TOhlc, TTime> _ohlcRepoSaverBaseSaver;
+
+        public ManualResetEvent IsFinished { get; } = new(false);
+
+        public IqOhlcBaseDownloaderObserverSaver(IOhlcRepoCombined<TOhlc, TTime> ohlcRepoSaverBaseSaver)
+        {
+            _ohlcRepoSaverBaseSaver = ohlcRepoSaverBaseSaver;
         }
 
-        public void Dispose()
+        public void OnCompleted()
         {
-            _cts.Cancel();
-            _backgroundSaver.Wait();
+            Log.Info("Finished IqOhlcBaseDownloaderObserverSaver.");
+            IsFinished.Set();
+        }
+
+        public void OnError(Exception error)
+        {
+            IsFinished.Set();
+            throw new NotImplementedException();
+        }
+
+        public void OnNext(TOhlc value)
+        {
+            _ohlcRepoSaverBaseSaver.Save(value);
         }
     }
 
@@ -227,25 +158,11 @@ namespace IqFeedDownloaderLib
 
 
         public DailyOhlcController(
-            IOhlcRepoCombined<DailyOhlc, LocalDate> dailyOhlcRepoSaverBaseSaver,
+            IOhlcRepoCombined<DailyOhlc, LocalDate> dailyOhlcRepo,
             IqDailyOhlcDownloader iqDailyOhlcDownloader,
             DownloadPlanUtils downloadPlanUtils)
-            : base(iqDailyOhlcDownloader, dailyOhlcRepoSaverBaseSaver, downloadPlanUtils)
+            : base(iqDailyOhlcDownloader, dailyOhlcRepo, downloadPlanUtils)
         {
-        }
-
-        protected override Tuple<SymbolDatePair, DailyOhlc> GetSymbolDatesToVerifyIfSavedTemplate(
-            DailyOhlc poppedDailyOhlc)
-        {
-            var symbolDate = new SymbolDatePair
-            {
-                Symbol = poppedDailyOhlc.Symbol,
-                Date = poppedDailyOhlc.Ts
-            };
-
-            return
-                new Tuple<SymbolDatePair, DailyOhlc>(
-                    symbolDate, poppedDailyOhlc);
         }
     }
 
@@ -254,24 +171,10 @@ namespace IqFeedDownloaderLib
     {
         public MinuteOhlcController(
             IqMinuteOhlcDownloader iqDailyOhlcDownloader,
-            IOhlcRepoCombined<MinuteOhlc, ZonedDateTime> dailyOhlcRepoSaverBaseSaver,
+            IOhlcRepoCombined<MinuteOhlc, ZonedDateTime> dailyOhlcRepo,
             DownloadPlanUtils downloadPlanUtils)
-            : base(iqDailyOhlcDownloader, dailyOhlcRepoSaverBaseSaver, downloadPlanUtils)
+            : base(iqDailyOhlcDownloader, dailyOhlcRepo, downloadPlanUtils)
         {
-        }
-
-        protected override Tuple<SymbolDatePair, MinuteOhlc> GetSymbolDatesToVerifyIfSavedTemplate(
-            MinuteOhlc poppedDailyOhlc)
-        {
-            var symbolDate = new SymbolDatePair
-            {
-                Symbol = poppedDailyOhlc.Symbol,
-                Date = poppedDailyOhlc.Ts.Date
-            };
-
-            return
-                new Tuple<SymbolDatePair, MinuteOhlc>(
-                    symbolDate, poppedDailyOhlc);
         }
     }
 }

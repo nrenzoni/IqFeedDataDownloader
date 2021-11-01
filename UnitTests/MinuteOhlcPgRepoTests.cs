@@ -1,7 +1,9 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using CustomShared;
 using IqFeedDownloaderLib;
+using ModelGenerators;
 using Models;
 using NodaTime;
 using NUnit.Framework;
@@ -16,13 +18,15 @@ namespace UnitTests
         {
             TestCommon.SetupTest();
         }
-        
+
         [Test]
         public async Task WriteRowTest()
         {
             using var repo = new MinuteOhlcRepoPg(
-                IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr,
-                1);
+                IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr, 
+                "minute_ohlc_test",
+                flushSize: 1,
+                maxSimultaneousSavers: 1);
 
             var minuteOhlc = new MinuteOhlc
             {
@@ -35,7 +39,24 @@ namespace UnitTests
                 Volume = 100
             };
 
-            await repo.WriteToDbAsync(new List<MinuteOhlc> { minuteOhlc });
+            await repo.WriteToDbAsync(new List<MinuteOhlc> { minuteOhlc }, 0);
+        }
+
+        [Test]
+        public async Task WriteMultiOhlcToDbAsyncTest()
+        {
+            using var repo = new MinuteOhlcRepoPg(
+                IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr, 
+                "minute_ohlc_test",
+                flushSize: 1,
+                maxSimultaneousSavers: 1);
+
+            var minuteOhlcs = Enumerable.Range(1, 10001)
+                .Select(_ => OhlcGenerators.GenerateMinuteOhlc())
+                .ToList();
+
+
+            await repo.WriteToDbAsync(minuteOhlcs, 0);
         }
     }
 }

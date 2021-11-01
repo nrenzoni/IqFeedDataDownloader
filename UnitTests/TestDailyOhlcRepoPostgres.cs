@@ -20,7 +20,9 @@ namespace UnitTests
         public void TestDayDataPgDb1()
         {
             using var dayDataPgDb = new DailyOhlcRepoPg(
-                IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr);
+                IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr,
+                "daily_ohlc_test",
+                maxSimultaneousSavers: 50);
 
             for (int i = 2; i < 4; i++)
             {
@@ -44,7 +46,9 @@ namespace UnitTests
         public async Task TestGetAlreadySavedAsync()
         {
             using var repo = new DailyOhlcRepoPg(
-                IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr);
+                IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr,
+                "daily_ohlc_test",
+                maxSimultaneousSavers: 50);
 
             var toCheck = new List<SymbolDatePair>
             {
@@ -56,6 +60,31 @@ namespace UnitTests
             };
 
             var alreadySavedRes = await repo.GetAlreadySavedDaysAsync(toCheck);
+        }
+
+        [Test]
+        public async Task GetSavedDatesAsyncDownloadPlanTest()
+        {
+            using var repo = new DailyOhlcRepoPg(
+                IqFeedDownloaderConfigVariables.Instance.PostgresConnectionStr,
+                "daily_ohlc",
+                maxSimultaneousSavers: 50);
+
+            var downloadPlan = new DownloadPlan
+            {
+                Symbol = "UPC",
+                DownloadDateSchemata = new List<DownloadDateSchema>
+                {
+                    new DownloadDateSchema(
+                        new LocalDate(2021, 3, 15),
+                        new LocalDate(2021, 3, 20)),
+                    new DownloadDateSchema(
+                        new LocalDate(2021, 3, 22),
+                        new LocalDate(2021, 3, 30))
+                }
+            };
+
+            var alreadySavedRes = await repo.GetSavedDatesAsync(downloadPlan);
         }
     }
 }

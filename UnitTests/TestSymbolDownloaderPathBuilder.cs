@@ -20,7 +20,7 @@ namespace UnitTests
         public void SymbolDownloaderPathBuilderTest()
         {
             var tempDir = GetTemporaryDirectory();
-            var symbolDownloaderPathBuilder = new DailyTicksDownloaderPathBuilder(tempDir);
+            var symbolDownloaderPathBuilder = new DailyTicksDownloaderPathBuilderImpl(tempDir);
             var mockSymbol = "TEST";
             var mockDate = new LocalDate(2021, 1, 2);
 
@@ -36,7 +36,7 @@ namespace UnitTests
         public void TestGetAllPaths()
         {
             var tempDir = GetTemporaryDirectory();
-            var symbolDownloaderPathBuilder = new DailyTicksDownloaderPathBuilder(tempDir);
+            var symbolDownloaderPathBuilder = new DailyTicksDownloaderPathBuilderImpl(tempDir);
             var mockSymbol = "TEST";
             var mockDate = new LocalDate(2021, 1, 2);
 
