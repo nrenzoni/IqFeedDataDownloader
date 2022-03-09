@@ -19,7 +19,7 @@ namespace DownloaderMain
         private readonly MinuteOhlcController _minuteOhlcController;
         private readonly IqTickDownloader _iqTickDownloader;
         private readonly DownloadPlanUtils _downloadPlanUtils;
-        private SavedIqTickChecker _savedIqTickChecker;
+        private readonly SavedIqTickChecker _savedIqTickChecker;
 
         public CliHandlers(
             TiSymbolsPerDayRetrieverClient tiSymbolsPerDayRetrieverClient,
@@ -52,6 +52,9 @@ namespace DownloaderMain
                     break;
                 case CliOpts.StrategyType.RunningUp:
                     await DownloadRunningUpData(opts);
+                    break;
+                case CliOpts.StrategyType.IntradayGainers:
+                    await DownloadIntradayGainersData(opts);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -104,6 +107,19 @@ namespace DownloaderMain
                 case CliOpts.DataType.Tick:
                 case CliOpts.DataType.Default:
                     await DownloadRunningUpTickData(opts);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+        }
+
+        private async Task DownloadIntradayGainersData(CliOpts.DownloadIqDataForSymbolsOpts opts)
+        {
+            switch (opts.DataType)
+            {
+                case CliOpts.DataType.Tick:
+                case CliOpts.DataType.Default:
+                    await DownloadIntradayGainerTickData(opts);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -208,10 +224,39 @@ namespace DownloaderMain
                      $"between [{startingDate.ToYYYYMMDD()}, {endDate.ToYYYYMMDD()}]...");
 
             var runningUpSymbolListPerDay
-                = await symbolsRetrieverClient.GeRunningUpStockSymbolsAsync(startingDate, endDate);
+                = await symbolsRetrieverClient.GetRunningUpStockSymbolsAsync(startingDate, endDate);
 
             var symbolsForDateContainer =
                 SymbolsForDateContainer.FromSymbolListPerDay(runningUpSymbolListPerDay);
+
+            var downloadPlanBuilder = new TickDownloadPlanBuilder(
+                _marketDayChecker, 2, 3);
+
+            var downloadPlans
+                = downloadPlanBuilder.GetPlans(symbolsForDateContainer);
+
+            var toRetrieveDownloadPlans
+                = RemoveAlreadySavedTicks(downloadPlans);
+
+            _iqTickDownloader.Download(toRetrieveDownloadPlans);
+        }
+        
+        private async Task DownloadIntradayGainerTickData(CliOpts.DownloadIqDataForSymbolsOpts opts)
+        {
+            using var symbolsRetrieverClient = _tiSymbolsPerDayRetrieverClient;
+
+            var (startingDate, endDate) = GetStartEndDateFromCli(
+                opts.StartingFromDate.ParseToLocalDate(), opts.MaxDownloadDayCount,
+                CliOpts.DataType.Tick);
+
+            Log.Info($"Downloading tick data for highest ranked intraday gainer stocks " +
+                     $"between [{startingDate.ToYYYYMMDD()}, {endDate.ToYYYYMMDD()}]...");
+
+            var intradayGainerStockSymbolData
+                = await symbolsRetrieverClient.GetIntradayGainerStockSymbolsAsync(startingDate, endDate);
+
+            var symbolsForDateContainer =
+                SymbolsForDateContainer.FromSymbolListPerDay(intradayGainerStockSymbolData);
 
             var downloadPlanBuilder = new TickDownloadPlanBuilder(
                 _marketDayChecker, 2, 3);

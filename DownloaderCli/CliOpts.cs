@@ -10,8 +10,8 @@ namespace DownloaderMain
             PremarketGainers,
             PremarketLosers,
             SectorEtf,
-            RunningUp
-            
+            RunningUp,
+            IntradayGainers
         }
 
         public enum DataType

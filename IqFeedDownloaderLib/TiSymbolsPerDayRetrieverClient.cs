@@ -110,17 +110,26 @@ namespace IqFeedDownloaderLib
             return await GetAsync<List<SymbolListPerDay>>(uri, _client);
         }
 
-        public async Task<List<SymbolListPerDay>> GeRunningUpStockSymbolsAsync(
+        public async Task<List<SymbolListPerDay>> GetRunningUpStockSymbolsAsync(
             LocalDate? startDate,
             LocalDate? endDate)
         {
-
             var otherQueryParams = new Dictionary<string, string>
             {
-                { "min_alert_quality", 1.5.ToString() }
+                { "min_alert_quality", "1.5" }
             };
 
             var uri = BuildUri("running-up", startDate, endDate, otherQueryParams);
+            return await GetAsync<List<SymbolListPerDay>>(uri, _client);
+        }
+
+        public async Task<List<SymbolListPerDay>> GetIntradayGainerStockSymbolsAsync(
+            LocalDate? startDate,
+            LocalDate? endDate)
+        {
+            var otherQueryParams = new Dictionary<string, string>();
+
+            var uri = BuildUri("intraday-gainers", startDate, endDate, otherQueryParams);
             return await GetAsync<List<SymbolListPerDay>>(uri, _client);
         }
 
@@ -140,6 +149,7 @@ namespace IqFeedDownloaderLib
                     query[key] = value;
                 }
             }
+
             uriBuilder.Query = query.ToString();
             var uri = uriBuilder.ToString();
             return uri;

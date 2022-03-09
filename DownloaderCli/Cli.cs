@@ -45,7 +45,7 @@ namespace DownloaderMain
                     scope.Resolve<SavedIqTickChecker>());
 
                 await parseResults
-                    .WithParsedAsync<CliOpts.DownloadIqDataForSymbolsOpts>(handlers.HandleDownloadIqDataForSymbols);
+                    .WithParsedAsync(handlers.HandleDownloadIqDataForSymbols);
             }
 
             Log.Info("Finished CLI run.");
